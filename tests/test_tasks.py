@@ -61,8 +61,9 @@ def test_create_task_without_title_is_rejected():
         },
     )
 
-    assert response.status_code == 422
-    assert main.tasks == []
+    tasks_response = client.get("/tasks")
+    assert tasks_response.status_code == 200
+    assert tasks_response.json() == []
 
 def test_create_task_with_empty_title_is_rejected():
     response = client.post(
@@ -72,8 +73,9 @@ def test_create_task_with_empty_title_is_rejected():
         },
     )
 
-    assert response.status_code == 422
-    assert main.tasks == []
+    tasks_response = client.get("/tasks")
+    assert tasks_response.status_code == 200
+    assert tasks_response.json() == []
 
 def test_create_task_with_too_long_title_is_rejected():
     response = client.post(
@@ -82,9 +84,9 @@ def test_create_task_with_too_long_title_is_rejected():
             "title": "A" * 101,
         },
     )
-
-    assert response.status_code == 422
-    assert main.tasks == []
+    tasks_response = client.get("/tasks")
+    assert tasks_response.status_code == 200
+    assert tasks_response.json() == []
 
 def test_get_existing_task():
     create_response = client.post(

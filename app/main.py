@@ -1,5 +1,10 @@
-from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel, Field
+from fastapi import Depends, FastAPI, HTTPException, Response, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app import models
+from app.database import get_db
+from app.schemas import TaskCreate, TaskResponse, TaskUpdate
 
 
 app = FastAPI(
@@ -9,48 +14,29 @@ app = FastAPI(
 )
 
 
-class TaskCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=100)
-    description: str | None = Field(default=None, max_length=500)
-
-
-class TaskUpdate(BaseModel):
-    title: str = Field(min_length=1, max_length=100)
-    description: str | None = Field(default=None, max_length=500)
-    completed: bool
-
-
-class TaskResponse(BaseModel):
-    id: int
-    title: str
-    description: str | None
-    completed: bool
-
-
-tasks = []
-next_task_id = 1
-
-
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
 
 
 @app.get("/tasks", response_model=list[TaskResponse])
-def get_tasks():
-    return tasks
+def get_tasks(db: Session = Depends(get_db)):
+    statement = select(models.Task).order_by(models.Task.id)
+
+    return db.scalars(statement).all()
 
 
 @app.get("/tasks/{task_id}", response_model=TaskResponse)
-def get_task(task_id: int):
-    for task in tasks:
-        if task["id"] == task_id:
-            return task
+def get_task(task_id: int, db: Session = Depends(get_db)):
+    task = db.get(models.Task, task_id)
 
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="Task not found",
-    )
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found",
+        )
+
+    return task
 
 
 @app.post(
@@ -58,49 +44,64 @@ def get_task(task_id: int):
     response_model=TaskResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_task(task: TaskCreate):
-    global next_task_id
+def create_task(
+    task: TaskCreate,
+    db: Session = Depends(get_db),
+):
+    db_task = models.Task(
+        title=task.title,
+        description=task.description,
+        completed=False,
+    )
 
-    new_task = {
-        "id": next_task_id,
-        "title": task.title,
-        "description": task.description,
-        "completed": False,
-    }
+    db.add(db_task)
+    db.commit()
+    db.refresh(db_task)
 
-    tasks.append(new_task)
-    next_task_id += 1
-
-    return new_task
+    return db_task
 
 
 @app.put("/tasks/{task_id}", response_model=TaskResponse)
-def update_task(task_id: int, updated_task: TaskUpdate):
-    for task in tasks:
-        if task["id"] == task_id:
-            task["title"] = updated_task.title
-            task["description"] = updated_task.description
-            task["completed"] = updated_task.completed
+def update_task(
+    task_id: int,
+    updated_task: TaskUpdate,
+    db: Session = Depends(get_db),
+):
+    task = db.get(models.Task, task_id)
 
-            return task
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found",
+        )
 
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="Task not found",
-    )
+    task.title = updated_task.title
+    task.description = updated_task.description
+    task.completed = updated_task.completed
+
+    db.commit()
+    db.refresh(task)
+
+    return task
 
 
 @app.delete(
     "/tasks/{task_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-def delete_task(task_id: int):
-    for index, task in enumerate(tasks):
-        if task["id"] == task_id:
-            tasks.pop(index)
-            return
+def delete_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+):
+    task = db.get(models.Task, task_id)
 
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="Task not found",
-    )
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found",
+        )
+
+    db.delete(task)
+    db.commit()
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
