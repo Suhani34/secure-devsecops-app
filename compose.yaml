@@ -1,0 +1,100 @@
+name: secure-devsecops-app
+
+services:
+
+  db:
+    image: postgres:18.6-bookworm
+
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
+      POSTGRES_DB: postgres
+
+      APP_DB_USER: ${DB_USER}
+      APP_DB_PASSWORD: ${DB_PASSWORD}
+      APP_DB_NAME: ${DB_NAME}
+      APP_TEST_DB_NAME: ${TEST_DB_NAME}
+
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./docker/postgres/init/01-create-app-user.sh:/docker-entrypoint-initdb.d/01-create-app-user.sh:ro
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U postgres -d postgres
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+    networks:
+      - backend
+
+    restart: unless-stopped
+
+
+  db-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    image: secure-task-api:0.2
+
+    command:
+      - sh
+      - -c
+      - python -m app.init_db && DB_NAME=$$TEST_DB_NAME python -m app.init_db
+
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      TEST_DB_NAME: ${TEST_DB_NAME}
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    networks:
+      - backend
+
+    restart: "no"
+
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    image: secure-task-api:0.2
+
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+
+    ports:
+      - "127.0.0.1:8000:8000"
+
+    networks:
+      - backend
+
+    restart: unless-stopped
+
+
+volumes:
+  postgres_data:
+
+
+networks:
+  backend:
+    driver: bridge
