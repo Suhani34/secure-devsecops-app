@@ -5,6 +5,11 @@ from app import main
 
 client = TestClient(main.app)
 
+def test_readiness_check():
+    response = client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready"}
 
 def test_health_check():
     response = client.get("/health")

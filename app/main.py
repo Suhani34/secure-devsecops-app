@@ -1,5 +1,6 @@
 from fastapi import Depends, FastAPI, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app import models
@@ -13,11 +14,22 @@ app = FastAPI(
     version="1.0.0",
 )
 
-
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
 
+@app.get("/ready")
+def readiness_check(db: Session = Depends(get_db)):
+    try:
+        db.execute(text("SELECT 1"))
+
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database unavailable",
+        )
+
+    return {"status": "ready"}
 
 @app.get("/tasks", response_model=list[TaskResponse])
 def get_tasks(db: Session = Depends(get_db)):
