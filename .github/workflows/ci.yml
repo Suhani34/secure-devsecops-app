@@ -1,0 +1,137 @@
+name: CI
+
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+
+permissions:
+  contents: read
+
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+
+jobs:
+
+  test:
+
+    name: Python Tests
+
+    runs-on: ubuntu-24.04
+
+    timeout-minutes: 10
+
+
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+
+      DB_NAME: secure_tasks_test
+      DB_USER: secure_app
+
+      DB_PASSWORD: ci-${{ github.run_id }}-${{ github.run_attempt }}
+
+      TEST_DB_NAME: secure_tasks_test
+
+
+    services:
+
+      postgres:
+
+        image: postgres:18.6-bookworm
+
+        env:
+          POSTGRES_USER: secure_app
+          POSTGRES_PASSWORD: ci-${{ github.run_id }}-${{ github.run_attempt }}
+          POSTGRES_DB: secure_tasks_test
+
+        ports:
+          - 5432:5432
+
+        options: >-
+          --health-cmd "pg_isready -U secure_app -d secure_tasks_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+
+    steps:
+
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+          cache: pip
+
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+
+      - name: Show Python version
+        run: |
+          python --version
+          python -m pip --version
+
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+
+      - name: Verify PostgreSQL connection
+        run: |
+          python - <<'PY'
+          import os
+          import psycopg
+
+          connection = psycopg.connect(
+              host=os.environ["DB_HOST"],
+              port=os.environ["DB_PORT"],
+              dbname=os.environ["DB_NAME"],
+              user=os.environ["DB_USER"],
+              password=os.environ["DB_PASSWORD"],
+          )
+
+          with connection.cursor() as cursor:
+              cursor.execute(
+                  "SELECT current_database(), current_user"
+              )
+
+              database, user = cursor.fetchone()
+
+          connection.close()
+
+          print(
+              f"PostgreSQL connection successful: "
+              f"database={database}, user={user}"
+          )
+          PY
+
+
+      - name: Run tests with coverage
+        run: |
+          python -m pytest \
+            -v \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-report=xml
