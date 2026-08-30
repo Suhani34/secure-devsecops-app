@@ -11,6 +11,8 @@ htmlcov/
 docker/
 compose.yaml
 
+secrets/
+
 .env
 .env.*
 !.env.example

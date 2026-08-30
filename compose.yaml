@@ -7,13 +7,17 @@ services:
 
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
       POSTGRES_DB: postgres
 
       APP_DB_USER: ${DB_USER}
-      APP_DB_PASSWORD: ${DB_PASSWORD}
+      APP_DB_PASSWORD_FILE: /run/secrets/db_password
       APP_DB_NAME: ${DB_NAME}
       APP_TEST_DB_NAME: ${TEST_DB_NAME}
+
+    secrets:
+      - postgres_admin_password
+      - db_password
 
     volumes:
       - postgres_data:/var/lib/postgresql
@@ -51,8 +55,11 @@ services:
       DB_PORT: "5432"
       DB_NAME: ${DB_NAME}
       DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
+      DB_PASSWORD_FILE: /run/secrets/db_password
       TEST_DB_NAME: ${TEST_DB_NAME}
+
+    secrets:
+      - db_password
 
     depends_on:
       db:
@@ -78,7 +85,10 @@ services:
       DB_PORT: "5432"
       DB_NAME: ${DB_NAME}
       DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
+      DB_PASSWORD_FILE: /run/secrets/db_password
+
+    secrets:
+      - db_password
 
     depends_on:
       db-init:
@@ -151,3 +161,11 @@ networks:
   backend:
     driver: bridge
     internal: true
+
+secrets:
+
+  db_password:
+    file: ./secrets/db_password.txt
+
+  postgres_admin_password:
+    file: ./secrets/postgres_admin_password.txt
