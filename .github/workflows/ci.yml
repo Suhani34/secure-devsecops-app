@@ -211,3 +211,55 @@ jobs:
             --config auto \
             --error \
             .
+  dependency-scan:
+
+    name: Dependency & Config Scan - Trivy
+
+    runs-on: ubuntu-24.04
+
+    timeout-minutes: 10
+
+
+    permissions:
+      contents: read
+
+
+    steps:
+
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+
+      - name: Set up Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.74.0
+          cache: true
+
+
+      - name: Show Trivy version
+        run: |
+          trivy --version
+
+
+      - name: Report HIGH and CRITICAL findings
+        run: |
+          trivy fs \
+            --scanners vuln,misconfig \
+            --file-patterns 'pip:requirements-dev\.txt' \
+            --severity HIGH,CRITICAL \
+            --exit-code 0 \
+            .
+
+
+      - name: Enforce fixable HIGH and CRITICAL gate
+        run: |
+          trivy fs \
+            --scanners vuln,misconfig \
+            --file-patterns 'pip:requirements-dev\.txt' \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 \
+            .
