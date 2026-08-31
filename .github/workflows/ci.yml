@@ -263,3 +263,83 @@ jobs:
             --ignore-unfixed \
             --exit-code 1 \
             .
+
+  image-scan:
+
+    name: Docker Image Scan - Trivy
+
+    runs-on: ubuntu-24.04
+
+    timeout-minutes: 15
+
+
+    permissions:
+      contents: read
+
+
+    needs:
+      - test
+      - secret-scan
+      - sast
+      - dependency-scan
+
+
+    env:
+      IMAGE_NAME: secure-task-api:ci-${{ github.sha }}
+
+
+    steps:
+
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+
+      - name: Set up Trivy
+        uses: aquasecurity/setup-trivy@e07451d2e059ed86c2870430ea286b3a9e0bf241
+        with:
+          version: v0.74.0
+          cache: true
+
+
+      - name: Show Docker and Trivy versions
+        run: |
+          docker --version
+          trivy --version
+
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            --pull \
+            --tag "$IMAGE_NAME" \
+            .
+
+
+      - name: Verify image metadata
+        run: |
+          docker image inspect "$IMAGE_NAME" \
+            --format='Image={{.RepoTags}} User={{.Config.User}} Size={{.Size}}'
+
+
+      - name: Report HIGH and CRITICAL image vulnerabilities
+        run: |
+          trivy image \
+            --scanners vuln \
+            --pkg-types os,library \
+            --severity HIGH,CRITICAL \
+            --exit-code 0 \
+            "$IMAGE_NAME"
+
+
+      - name: Enforce Docker image vulnerability gate
+        run: |
+          trivy image \
+            --scanners vuln \
+            --pkg-types os,library \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 \
+            --exit-on-eol 1 \
+            "$IMAGE_NAME"
