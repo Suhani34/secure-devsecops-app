@@ -135,7 +135,8 @@ jobs:
             -v \
             --cov=app \
             --cov-report=term-missing \
-            --cov-report=xml
+            --cov-report=xml \
+            --cov-fail-under=80
 
 
   secret-scan:
@@ -343,3 +344,59 @@ jobs:
             --exit-code 1 \
             --exit-on-eol 1 \
             "$IMAGE_NAME"
+
+  security-gate:
+
+    name: Security Gate
+
+    runs-on: ubuntu-24.04
+
+    timeout-minutes: 5
+
+
+    permissions:
+      contents: read
+
+
+    needs:
+      - test
+      - secret-scan
+      - sast
+      - dependency-scan
+      - image-scan
+
+
+    if: ${{ always() }}
+
+
+    steps:
+
+      - name: Verify required CI results
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          GITLEAKS_RESULT: ${{ needs.secret-scan.result }}
+          SEMGREP_RESULT: ${{ needs.sast.result }}
+          DEPENDENCY_SCAN_RESULT: ${{ needs.dependency-scan.result }}
+          IMAGE_SCAN_RESULT: ${{ needs.image-scan.result }}
+
+        run: |
+          echo "Required CI results:"
+          echo "Python Tests:              $TEST_RESULT"
+          echo "Gitleaks:                  $GITLEAKS_RESULT"
+          echo "Semgrep:                   $SEMGREP_RESULT"
+          echo "Trivy Dependency Scan:     $DEPENDENCY_SCAN_RESULT"
+          echo "Trivy Docker Image Scan:   $IMAGE_SCAN_RESULT"
+
+          if [ "$TEST_RESULT" != "success" ] \
+            || [ "$GITLEAKS_RESULT" != "success" ] \
+            || [ "$SEMGREP_RESULT" != "success" ] \
+            || [ "$DEPENDENCY_SCAN_RESULT" != "success" ] \
+            || [ "$IMAGE_SCAN_RESULT" != "success" ]; then
+
+              echo
+              echo "SECURITY GATE FAILED"
+              exit 1
+          fi
+
+          echo
+          echo "SECURITY GATE PASSED"
