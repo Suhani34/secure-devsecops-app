@@ -230,21 +230,29 @@ else
 fi
 
 
-API_PORT="$(dc port api 8000 2>/dev/null || true)"
+API_PORT_BINDINGS="$(
+    docker_cmd inspect "$API_ID" \
+      --format='{{json .HostConfig.PortBindings}}'
+)"
 
-if [ -z "$API_PORT" ]; then
+if [ "$API_PORT_BINDINGS" = "{}" ] \
+    || [ "$API_PORT_BINDINGS" = "null" ]; then
     pass "API has no host-published port"
 else
-    fail "API exposed to host: $API_PORT"
+    fail "API has host port bindings: $API_PORT_BINDINGS"
 fi
 
 
-DB_PORT="$(dc port db 5432 2>/dev/null || true)"
+DB_PORT_BINDINGS="$(
+    docker_cmd inspect "$DB_ID" \
+      --format='{{json .HostConfig.PortBindings}}'
+)"
 
-if [ -z "$DB_PORT" ]; then
+if [ "$DB_PORT_BINDINGS" = "{}" ] \
+    || [ "$DB_PORT_BINDINGS" = "null" ]; then
     pass "PostgreSQL has no host-published port"
 else
-    fail "PostgreSQL exposed to host: $DB_PORT"
+    fail "PostgreSQL has host port bindings: $DB_PORT_BINDINGS"
 fi
 
 
