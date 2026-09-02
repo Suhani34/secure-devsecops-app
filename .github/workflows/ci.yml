@@ -345,6 +345,115 @@ jobs:
             --exit-on-eol 1 \
             "$IMAGE_NAME"
 
+  runtime-security:
+
+    name: Runtime Security Validation
+
+    runs-on: ubuntu-24.04
+
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+
+    needs:
+      - image-scan
+
+    env:
+      DB_USER: secure_app
+      DB_NAME: secure_tasks
+      TEST_DB_NAME: secure_tasks_test
+
+    steps:
+
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Create temporary CI secrets
+        run: |
+          mkdir -p secrets
+
+          chmod 700 secrets
+
+          openssl rand -hex 32 > secrets/db_password.txt
+          openssl rand -hex 32 > secrets/postgres_admin_password.txt
+
+          chmod 644 secrets/db_password.txt
+          chmod 644 secrets/postgres_admin_password.txt
+
+      - name: Validate Docker Compose configuration
+        run: |
+          docker compose config -q
+
+      - name: Start hardened application stack
+        run: |
+          docker compose up -d --build
+
+      - name: Wait for application readiness
+        run: |
+          for attempt in $(seq 1 30); do
+
+            echo "Readiness attempt $attempt/30"
+
+            if curl \
+              --fail \
+              --silent \
+              --show-error \
+              http://127.0.0.1:8080/ready
+            then
+              echo
+              echo "Application is ready"
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          echo
+          echo "Application did not become ready in time"
+
+          docker compose ps -a
+          docker compose logs --no-color --tail=100
+
+          exit 1
+
+      - name: Verify database initialization
+        run: |
+          DB_INIT_ID="$(docker compose ps -a -q db-init)"
+
+          test -n "$DB_INIT_ID"
+
+          EXIT_CODE="$(
+            docker inspect \
+              "$DB_INIT_ID" \
+              --format='{{.State.ExitCode}}'
+          )"
+
+          echo "db-init exit code: $EXIT_CODE"
+
+          test "$EXIT_CODE" -eq 0
+
+      - name: Run runtime security validation
+        run: |
+          ./scripts/runtime-security-checks.sh
+
+      - name: Show container state on failure
+        if: ${{ failure() }}
+        run: |
+          docker compose ps -a
+          docker compose logs \
+            --no-color \
+            --tail=200
+
+      - name: Clean up runtime environment
+        if: ${{ always() }}
+        run: |
+          docker compose down \
+            -v \
+            --remove-orphans
+
   security-gate:
 
     name: Security Gate
@@ -364,7 +473,7 @@ jobs:
       - sast
       - dependency-scan
       - image-scan
-
+      - runtime-security
 
     if: ${{ always() }}
 
@@ -378,6 +487,7 @@ jobs:
           SEMGREP_RESULT: ${{ needs.sast.result }}
           DEPENDENCY_SCAN_RESULT: ${{ needs.dependency-scan.result }}
           IMAGE_SCAN_RESULT: ${{ needs.image-scan.result }}
+          RUNTIME_SECURITY_RESULT: ${{ needs.runtime-security.result }}
 
         run: |
           echo "Required CI results:"
@@ -386,12 +496,14 @@ jobs:
           echo "Semgrep:                   $SEMGREP_RESULT"
           echo "Trivy Dependency Scan:     $DEPENDENCY_SCAN_RESULT"
           echo "Trivy Docker Image Scan:   $IMAGE_SCAN_RESULT"
+          echo "Runtime Security:         $RUNTIME_SECURITY_RESULT"
 
           if [ "$TEST_RESULT" != "success" ] \
             || [ "$GITLEAKS_RESULT" != "success" ] \
             || [ "$SEMGREP_RESULT" != "success" ] \
             || [ "$DEPENDENCY_SCAN_RESULT" != "success" ] \
-            || [ "$IMAGE_SCAN_RESULT" != "success" ]; then
+            || [ "$IMAGE_SCAN_RESULT" != "success" ] \
+            || [ "$RUNTIME_SECURITY_RESULT" != "success" ]; then
 
               echo
               echo "SECURITY GATE FAILED"

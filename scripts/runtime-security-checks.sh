@@ -43,26 +43,58 @@ NGINX_ID="$(dc ps -q nginx)"
 DB_ID="$(dc ps -q db)"
 DBINIT_ID="$(dc ps -a -q db-init)"
 
-
 # --------------------------------------------------
 # 1. Service health
 # --------------------------------------------------
 
+wait_for_healthy() {
+
+    service="$1"
+    max_attempts=30
+    delay=2
+
+    for attempt in $(seq 1 "$max_attempts"); do
+
+        id="$(dc ps -q "$service")"
+
+        if [ -z "$id" ]; then
+            echo "[INFO] $service container not found yet ($attempt/$max_attempts)"
+            sleep "$delay"
+            continue
+        fi
+
+        health="$(
+            docker_cmd inspect "$id" \
+              --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+              2>/dev/null \
+            || echo "unknown"
+        )"
+
+        echo "[INFO] $service health=$health ($attempt/$max_attempts)"
+
+        if [ "$health" = "healthy" ]; then
+            pass "$service health check"
+            return 0
+        fi
+
+        case "$health" in
+            exited|dead)
+                fail "$service stopped before becoming healthy"
+                return 1
+                ;;
+        esac
+
+        sleep "$delay"
+
+    done
+
+    fail "$service did not become healthy within $((max_attempts * delay)) seconds"
+    return 1
+}
+
+
 for service in api nginx db; do
-
-    id="$(dc ps -q "$service")"
-
-    health="$(
-        docker_cmd inspect "$id" \
-          --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'
-    )"
-
-    if [ "$health" = "healthy" ]; then
-        pass "$service health check"
-    else
-        fail "$service health check: $health"
-    fi
-
+    wait_for_healthy "$service"
 done
 
 
@@ -229,23 +261,29 @@ else
     fail "Unexpected Nginx port mapping: $NGINX_PORT"
 fi
 
+API_PUBLISHED_PORTS="$(
+    docker_cmd inspect "$API_ID" \
+      --format='{{range $port, $bindings := .NetworkSettings.Ports}}{{if $bindings}}{{$port}}={{json $bindings}} {{end}}{{end}}'
+)"
 
-API_PORT="$(dc port api 8000 2>/dev/null || true)"
-
-if [ -z "$API_PORT" ]; then
+if [ -z "$API_PUBLISHED_PORTS" ]; then
     pass "API has no host-published port"
 else
-    fail "API exposed to host: $API_PORT"
+    fail "API has host-published ports: $API_PUBLISHED_PORTS"
 fi
 
 
-DB_PORT="$(dc port db 5432 2>/dev/null || true)"
+DB_PUBLISHED_PORTS="$(
+    docker_cmd inspect "$DB_ID" \
+      --format='{{range $port, $bindings := .NetworkSettings.Ports}}{{if $bindings}}{{$port}}={{json $bindings}} {{end}}{{end}}'
+)"
 
-if [ -z "$DB_PORT" ]; then
+if [ -z "$DB_PUBLISHED_PORTS" ]; then
     pass "PostgreSQL has no host-published port"
 else
-    fail "PostgreSQL exposed to host: $DB_PORT"
+    fail "PostgreSQL has host-published ports: $DB_PUBLISHED_PORTS"
 fi
+
 
 
 # --------------------------------------------------
